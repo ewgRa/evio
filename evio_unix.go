@@ -22,8 +22,8 @@ import (
 	"github.com/tidwall/evio/internal"
 )
 
-func SetEpollWaitTimeout(timeout int) {
-	internal.EpollWaitTimeout = timeout
+func SetEpollWaitTimeout(wait int32) {
+	atomic.StoreInt32(&internal.EpollWaitTimeout, wait)
 }
 
 type conn struct {
