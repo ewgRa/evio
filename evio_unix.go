@@ -22,6 +22,10 @@ import (
 	"github.com/tidwall/evio/internal"
 )
 
+func SetEpollWaitTimeout(timeout int) {
+	internal.EpollWaitTimeout = timeout
+}
+
 type conn struct {
 	fd         int              // file descriptor
 	lnidx      int              // listener index in the server lns list

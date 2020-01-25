@@ -50,11 +50,13 @@ func (p *Poll) Trigger(note interface{}) error {
 	return err
 }
 
+var EpollWaitTimeout = 100
+
 // Wait ...
 func (p *Poll) Wait(iter func(fd int, note interface{}) error) error {
-	events := make([]syscall.EpollEvent, 64)
+	events := make([]syscall.EpollEvent, 256)
 	for {
-		n, err := syscall.EpollWait(p.fd, events, 100)
+		n, err := syscall.EpollWait(p.fd, events, EpollWaitTimeout)
 		if err != nil && err != syscall.EINTR {
 			return err
 		}
