@@ -8,6 +8,7 @@ package evio
 
 import (
 	"io"
+	"log"
 	"net"
 	"os"
 	"runtime"
@@ -15,6 +16,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unsafe"
 
 	reuseport "github.com/kavu/go_reuseport"
 	"github.com/tidwall/evio/internal"
@@ -44,6 +46,26 @@ func (c *conn) Wake() {
 	if c.loop != nil {
 		c.loop.poll.Trigger(c)
 	}
+}
+
+func (c *conn) WriteAhead(out []byte) []byte {
+	if len(out) != 0 {
+		n, err := write(c.fd, out)
+		if err != nil {
+			if err != syscall.EAGAIN {
+				//return loopCloseConn(s, l, c, err)
+				log.Fatal("WriteAhead err != syscall.EAGAIN")
+			}
+			n = 0
+			//println("wtite EAGAIN")
+		}
+		if n == len(out) {
+			return nil
+		} else {
+			return out[n:]
+		}
+	}
+	return out
 }
 
 type server struct {
@@ -238,8 +260,8 @@ func loopRun(s *server, l *loop) {
 			return loopOpened(s, l, c)
 		case len(c.out) > 0:
 			return loopWrite(s, l, c)
-		case c.action != None:
-			return loopAction(s, l, c)
+//		case c.action != None:
+//			return loopAction(s, l, c)
 		default:
 			return loopRead(s, l, c)
 		}
@@ -329,9 +351,9 @@ func loopUDPRead(s *server, l *loop, lnidx, fd int) error {
 		in := append([]byte{}, l.packet[:n]...)
 		out, action := s.events.Data(c, in)
 		if len(out) > 0 {
-			if s.events.PreWrite != nil {
-				s.events.PreWrite()
-			}
+//			if s.events.PreWrite != nil {
+//				s.events.PreWrite()
+//			}
 			syscall.Sendto(fd, out, 0, sa)
 		}
 		switch action {
@@ -359,6 +381,24 @@ func loopOpened(s *server, l *loop, c *conn) error {
 				internal.SetKeepAlive(c.fd, int(opts.TCPKeepAlive/time.Second))
 			}
 		}
+
+		if opts.TCPNoDelay {
+			if err := syscall.SetsockoptInt(c.fd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1); err != nil {
+				log.Fatal("syscall.IPPROTO_TCP, syscall.TCP_NODELAY")
+			}
+		}
+
+		if opts.SendBuffer > 0 {
+			if err := syscall.SetsockoptInt(c.fd, syscall.SOL_SOCKET, syscall.SO_SNDBUF, opts.SendBuffer); err != nil {
+				log.Fatal("syscall.SOL_SOCKET, syscall.SO_SNDBUF")
+			}
+		}
+
+		if opts.ReceiveBuffer > 0 {
+			if err := syscall.SetsockoptInt(c.fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, opts.ReceiveBuffer); err != nil {
+				log.Fatal("syscall.SOL_SOCKET, syscall.SO_RCVBUF")
+			}
+		}
 	}
 	if len(c.out) == 0 && c.action == None {
 		l.poll.ModRead(c.fd)
@@ -367,9 +407,9 @@ func loopOpened(s *server, l *loop, c *conn) error {
 }
 
 func loopWrite(s *server, l *loop, c *conn) error {
-	if s.events.PreWrite != nil {
-		s.events.PreWrite()
-	}
+//   if s.events.PreWrite != nil {
+//	   s.events.PreWrite()
+//   }
 	n, err := syscall.Write(c.fd, c.out)
 	if err != nil {
 		if err == syscall.EAGAIN {
@@ -426,9 +466,62 @@ func loopWake(s *server, l *loop, c *conn) error {
 	return nil
 }
 
+var _zero uintptr
+
+var (
+	errEAGAIN error = syscall.EAGAIN
+	errEINVAL error = syscall.EINVAL
+	errENOENT error = syscall.ENOENT
+)
+
+// errnoErr returns common boxed Errno values, to prevent
+// allocations at runtime.
+func errnoErr(e syscall.Errno) error {
+	switch e {
+	case 0:
+		return nil
+	case syscall.EAGAIN:
+		return errEAGAIN
+	case syscall.EINVAL:
+		return errEINVAL
+	case syscall.ENOENT:
+		return errENOENT
+	}
+	return e
+}
+func read(fd int, p []byte) (n int, err error) {
+	var _p0 unsafe.Pointer
+	if len(p) > 0 {
+		_p0 = unsafe.Pointer(&p[0])
+	} else {
+		_p0 = unsafe.Pointer(&_zero)
+	}
+	r0, _, e1 := syscall.Syscall(syscall.SYS_READ, uintptr(fd), uintptr(_p0), uintptr(len(p)))
+	n = int(r0)
+	if e1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func write(fd int, p []byte) (n int, err error) {
+	var _p0 unsafe.Pointer
+	if len(p) > 0 {
+		_p0 = unsafe.Pointer(&p[0])
+	} else {
+		_p0 = unsafe.Pointer(&_zero)
+	}
+	r0, _, e1 := syscall.Syscall(syscall.SYS_WRITE, uintptr(fd), uintptr(_p0), uintptr(len(p)))
+	n = int(r0)
+	if e1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
 func loopRead(s *server, l *loop, c *conn) error {
 	var in []byte
-	n, err := syscall.Read(c.fd, l.packet)
+	n, err := read(c.fd, l.packet) //syscall.Read(c.fd, l.packet)
 	if n == 0 || err != nil {
 		if err == syscall.EAGAIN {
 			return nil

@@ -36,6 +36,9 @@ type Options struct {
 	// Default value is false, which means that all input data which is
 	// passed to the Data event will be a uniquely copied []byte slice.
 	ReuseInputBuffer bool
+	TCPNoDelay bool
+	SendBuffer int
+	ReceiveBuffer int
 }
 
 // Server represents a server context which provides information about the
@@ -62,6 +65,7 @@ type Conn interface {
 	RemoteAddr() net.Addr
 	// Wake triggers a Data event for this connection.
 	Wake()
+	WriteAhead([]byte) []byte
 }
 
 // LoadBalance sets the load balancing method.
