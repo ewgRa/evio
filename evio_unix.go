@@ -535,8 +535,22 @@ func loopRead(s *server, l *loop, c *conn) error {
 	if s.events.Data != nil {
 		out, action := s.events.Data(c, in)
 		c.action = action
-		if len(out) > 0 {
-			c.out = append(c.out[:0], out...)
+		if len(out) != 0 {
+			n, err = write(c.fd, out)
+			if err != nil {
+				if err != syscall.EAGAIN {
+					return loopCloseConn(s, l, c, err)
+				}
+				n = 0
+				println("wtite EAGAIN")
+			}
+			if n == len(out) {
+				c.out = nil
+			} else {
+				c.out = out[n:]
+				println("wtite tail ", len(c.out))
+			}
+			//c.out = out // append([]byte{}, out...) // todo : can I just copy pointer and write only once? Ramen?
 		}
 	}
 	if len(c.out) != 0 || c.action != None {
